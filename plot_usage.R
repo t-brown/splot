@@ -21,6 +21,7 @@ main <- function()
 	dur <- duration(args$week)
 	usage <- slurm_usage(args$user, dur, args$group)
 	df <- map_usage(usage, dur, args$factor)
+	#df <- area_usage(usage, dur, args$factor)
 	pdf <- plot_usage(df, args$user, args$group)
 	subject <- paste('\'Job usage for', args$user,
 			 'from', gsub(':', '_', dur$start),
@@ -105,13 +106,17 @@ slurm_usage <- function(users, duration, group=FALSE)
 		prev <- tmp
 	}
 	q <- q[!is.na(q[,1]),]
+
+	usage <- data.frame()
 	usage <- as.data.frame(q)
 	colnames(usage) <- dnames
 	usage$jobs <- gsub('(\\w)_.*', '\\1', usage$jobs)
 	usage$jobs <- gsub('(\\w)-.*', '\\1', usage$jobs)
 	usage$start <- as.POSIXct(usage$start, format="%Y-%m-%dT%H:%M:%S", tz="UTC")
 	usage$end <- as.POSIXct(usage$end, format="%Y-%m-%dT%H:%M:%S", tz="UTC")
+	usage$cores <- as.numeric(as.character(usage$cores))
 
+	print(head(usage))
 	return(usage)
 }
 
@@ -135,14 +140,47 @@ map_usage <- function(usage, duration, factor)
 	  mins  <- seq(from=sr[j], to=er[j], by='min')
 	  for (i in mins) {
 	    id <- which(df$time == i)
-	    df[id, paste0(job)] <- as.numeric(cores) * factor
+	    df[id, paste0(job)] <- cores * factor
 	  }
 	}
 
 	df <- melt(df, id.vars="time")
 	names(df)[names(df) == "variable"] <- "jobs"
 	names(df)[names(df) == "value"] <- "cores"
+	print(head(df))
 	return(df)
+}
+
+area_usage <- function(usage, duration, factor)
+{
+	jobs <- unique(usage$jobs)
+	start <- gsub('T', ' ', duration$start)
+	sr <- round(usage$start, "mins")
+	er <- round(usage$end, "mins")
+
+	df <- data.frame(jobs = character(),
+			 xmin = numeric(),
+			 xmax = numeric(),
+			 ymin = numeric(),
+			 ymax = numeric())
+
+	#for (i in 1:nrow(usage)) {
+	for (i in 1:2) {
+		#print(usage[i,'jobs'], sr[i], er[i])
+		print(usage[i, 'start'], usage[i, 'end'])
+		
+		#	    round(usage[i, start], "mins"),
+		#	    round(usage[i, end], "mins"),
+		#	    0.0,
+		#	    as.numeric(usage[i, 'cores']) * factor)
+		#df[i,] <- c(usage[i, 'jobs'],
+		#	    round(usage[i, start], "mins"),
+		#	    round(usage[i, end], "mins"),
+		#	    0.0,
+		#	    as.numeric(usage[i, 'cores']) * factor)
+	}
+	return(df)
+
 }
 
 plot_usage <- function(df, user, group=FALSE)
@@ -153,11 +191,13 @@ plot_usage <- function(df, user, group=FALSE)
 		title <- paste('Usage for', user)
 	}
 	output <- paste0(user, '.pdf')
-	pdf(file=output, paper='letter')
 	ggplot(df, aes(x=time, y=cores, fill=jobs, group=time)) +
 	       geom_bar(stat='identity', position='stack')      +
 	       labs(x="Date", y="Cores", fill="Jobs", title=title)
-	invisible(dev.off())
+#	ggplot(df) +
+#	       geom_rect(aes(fill=jobs)) +
+#	       labs(x="Date", y="Cores", fill="Jobs", title=title)
+	ggsave(output, height=6, width=12)
 	return(output)
 }
 
@@ -174,7 +214,6 @@ mail <- function(output, to, subject, from=NULL, cc=NULL)
 	}
 	args <- c(args, '-r', reply, to, '< /dev/null')
 	#m <- system2('mailx', args, stdout=TRUE)
-	print(args)
 }
 
 err <- main()
