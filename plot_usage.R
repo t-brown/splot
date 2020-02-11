@@ -13,7 +13,7 @@ main <- function()
 	err <- 0
 
 	to <- 'tbrown@example.com'
-	cc <- 'fred@example.com'
+	cc <- ''
 	args <- parse_args()
 	if (args$group) {
 		args$user <- getent_group(args$user)
@@ -74,30 +74,43 @@ duration <- function(week=FALSE)
 # Get the slurm job usage
 slurm_usage <- function(users, duration, group=FALSE)
 {
+	fmt <- 'JobName%40,JobID,Start,End,AllocCPUS'
 	if (group) {
-		fmt = 'User%40,Start,End,AllocCPUS'
-	} else {
-		fmt = 'JobName%40,Start,End,AllocCPUS'
+		fmt <- 'User%40,JobID,Start,End,AllocCPUS'
 	}
-	dnames = c('jobs', 'start', 'end', 'cores')
 
-	#envs = c('TZ=UTC;', 'SLURM_TIME_FORMAT="%Y-%m-%d %H:%M:%S;')
-	args = c('--delimiter=,', '-p', '-n', '--format', fmt,
+	dnames <- c('jobs', 'id', 'start', 'end', 'cores')
+	envs <- c('TZ=UTC')
+	args <- c('--delimiter=,', '-p', '-n', '--format', fmt,
 		 '-S', duration$start, '-E', duration$end,
 		 '--user', users)
 
-	l <- system2('sacct', args, stdout=TRUE)
+	l <- system2('sacct', args, env=envs, stdout=TRUE)
 	l <- strsplit(l, ',')
-	m <- matrix(unlist(l), ncol=4, byrow=TRUE)
+	m <- matrix(unlist(l), ncol=5, byrow=TRUE)
 	m <- m[m[,1] != 'hydra_pmi_proxy',]
 	m <- m[m[,1] != 'pmi_proxy',]
 	m <- m[m[,1] != 'batch',]
-	usage <- as.data.frame(m)
+	prev <- 0.0
+	j <- 1
+	q <- matrix(NA, nrow=nrow(m), ncol=5, byrow=TRUE)
+	for (i in 1:nrow(m)) {
+		tmp <- as.double(m[i, 2])
+		if (tmp == prev) {
+			q[j-1,] <- m[i,]
+		} else {
+			q[j,] <- m[i,]
+		}
+		j <- j + 1
+		prev <- tmp
+	}
+	q <- q[!is.na(q[,1]),]
+	usage <- as.data.frame(q)
 	colnames(usage) <- dnames
 	usage$jobs <- gsub('(\\w)_.*', '\\1', usage$jobs)
 	usage$jobs <- gsub('(\\w)-.*', '\\1', usage$jobs)
-	usage$start <- as.POSIXct(usage$start, format="%Y-%m-%d %H:%M:%S", tz="UTC")
-	usage$end <- as.POSIXct(usage$end, format="%Y-%m-%d %H:%M:%S", tz="UTC")
+	usage$start <- as.POSIXct(usage$start, format="%Y-%m-%dT%H:%M:%S", tz="UTC")
+	usage$end <- as.POSIXct(usage$end, format="%Y-%m-%dT%H:%M:%S", tz="UTC")
 
 	return(usage)
 }
@@ -106,8 +119,8 @@ slurm_usage <- function(users, duration, group=FALSE)
 map_usage <- function(usage, duration, factor)
 {
 	jobs <- unique(usage$jobs)
-	start <- gsub('T', '', duration$start)
-	times <- as.POSIXct(seq(0, duration$dt, 60), format="%Y-%m-%d %H:%M:%S",
+	start <- gsub('T', ' ', duration$start)
+	times <- as.POSIXct(seq(from=0, to=duration$dt, by=60), format="%Y-%m-%d %H:%M:%S",
 			    origin=start, tz="UTC")
 
 	df <- data.frame(matrix(ncol=length(jobs), nrow=length(times)))
@@ -140,10 +153,11 @@ plot_usage <- function(df, user, group=FALSE)
 		title <- paste('Usage for', user)
 	}
 	output <- paste0(user, '.pdf')
-	p <- ggplot(df, aes(x=time, y=cores, fill=jobs, group=time)) +
-	     geom_bar(stat='identity', position='stack') +
-	     labs(x="Date", y="Cores", fill="Jobs", title=title)
-	ggsave(output, height=6, width=12)
+	pdf(file=output, paper='letter')
+	ggplot(df, aes(x=time, y=cores, fill=jobs, group=time)) +
+	       geom_bar(stat='identity', position='stack')      +
+	       labs(x="Date", y="Cores", fill="Jobs", title=title)
+	invisible(dev.off())
 	return(output)
 }
 
